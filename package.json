@@ -16,10 +16,11 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build && rm -rf docs && mv build docs",
+    "build": "node clean-build.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "serve-docs": "npx serve docs --cors -l 3000 --no-request-logging --debug"
+    "serve-local": "npx serve -s build -l 3000",
+    "deploy": "npm run build && git add docs && git commit -m 'Update production build' && git push"
   },
   "eslintConfig": {
     "extends": [
