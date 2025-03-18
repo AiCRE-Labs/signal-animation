@@ -2,25 +2,73 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 
 const SignalAnimation = () => {
+  const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const pointsRef = useRef([]);
   const textPixelsRef = useRef([]);
   
+  const [dimensions, setDimensions] = useState({ width: 1000, height: 700 });
   const [animationState, setAnimationState] = useState("initial");
-  const [clickable, setClickable] = useState(false);
   
-  // Initialize points on first render
+  // Handle resize
   useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        // Get container dimensions
+        const containerWidth = containerRef.current.clientWidth;
+        // Keep aspect ratio of 10:7
+        const containerHeight = containerWidth * 0.7;
+        
+        setDimensions({
+          width: containerWidth,
+          height: containerHeight
+        });
+      }
+    };
+    
+    // Set initial size
+    handleResize();
+    
+    // Add resize listener
+    window.addEventListener('resize', handleResize);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+  
+  // Update canvas when dimensions change
+  useEffect(() => {
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+      
+      // Reset animation state to restart with new dimensions
+      setAnimationState("initial");
+    }
+  }, [dimensions]);
+  
+  // Initialize points when animation state is "initial"
+  useEffect(() => {
+    if (animationState !== "initial" || !canvasRef.current) return;
+    
     const canvas = canvasRef.current;
     const width = canvas.width;
     const height = canvas.height;
-    const numPoints = 2000;
+    
+    // Adjust number of points based on screen size
+    // Increased density factor (changed from 250 to 150) to get more points
+    const numPoints = Math.min(10000, Math.max(6000, Math.floor(width * height / 150)));
+    
+    console.log(`Initializing ${numPoints} points for canvas size ${width}x${height}`);
     
     // Initialize points with random positions
     pointsRef.current = Array.from({ length: numPoints }, (_, i) => {
       const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * width * 0.3;
+      const distance = Math.random() * width * 0.4;
       const x = width / 2 + Math.cos(angle) * distance;
       const y = height / 2 + Math.sin(angle) * distance;
       
@@ -48,12 +96,32 @@ const SignalAnimation = () => {
     offscreenCtx.fillStyle = 'white';
     offscreenCtx.fillRect(0, 0, width, height);
     
-    // Draw text
+    // Draw text with adjusted font size to prevent clipping
     offscreenCtx.fillStyle = 'black';
-    offscreenCtx.font = 'bold 90px Arial';
+    
+    // Dynamically calculate font size based on canvas width
+    // Increased minimum font size for better visibility on small screens
+    let fontSize = Math.max(30, Math.min(70, width * 0.08));
+    offscreenCtx.font = `bold ${fontSize}px Arial`;
     offscreenCtx.textAlign = 'center';
-    offscreenCtx.textBaseline = 'middle';
-    offscreenCtx.fillText('Finding the signal', width / 2, height / 2);
+    offscreenCtx.textBaseline = 'bottom';
+    
+    const text = 'Finding the Signal';
+    
+    // Calculate text width and ensure it fits
+    let textWidth = offscreenCtx.measureText(text).width;
+    
+    // If text is too wide, reduce font size until it fits with padding
+    const padding = width * 0.1; // 10% padding on each side
+    while (textWidth > width - padding * 2 && fontSize > 26) {
+      fontSize -= 2;
+      offscreenCtx.font = `bold ${fontSize}px Arial`;
+      textWidth = offscreenCtx.measureText(text).width;
+    }
+    
+    // Draw the text, positioned in top third of canvas
+    // Updated to be positioned higher up for better separation from EKG
+    offscreenCtx.fillText(text, width / 2, height * 0.3);
     
     // Get image data
     const imageData = offscreenCtx.getImageData(0, 0, width, height);
@@ -61,7 +129,8 @@ const SignalAnimation = () => {
     
     // Find black pixels (text)
     const textPixels = [];
-    const pixelDensity = 3; // Sample every nth pixel
+    // Reduced pixel density to sample more text points (from 5 to 2)
+    const pixelDensity = Math.max(2, Math.min(3, Math.floor(width / 400)));
     
     for (let y = 0; y < height; y += pixelDensity) {
       for (let x = 0; x < width; x += pixelDensity) {
@@ -74,50 +143,15 @@ const SignalAnimation = () => {
     }
     
     console.log(`Found ${textPixels.length} text pixels`);
+    textPixelsRef.current = textPixels;
     
-    // If not enough pixels found, create manual text
-    if (textPixels.length < 200) {
-      console.log("Using manual text pixel generation");
-      const manualPixels = [];
-      const text = "Finding the signal";
-      const letterWidth = 40;
-      const letterHeight = 80;
-      const startX = width/2 - (text.length * letterWidth)/2;
-      const startY = height/2;
-      
-      // Create a simple grid for each letter
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        if (char === " ") continue;
-        
-        const letterX = startX + i * letterWidth;
-        
-        // For each letter, create a grid of points
-        for (let y = -letterHeight/2; y < letterHeight/2; y += 4) {
-          for (let x = -letterWidth/2; x < letterWidth/2; x += 4) {
-            if (Math.random() < 0.6) { // Add randomness
-              manualPixels.push({
-                x: letterX + x,
-                y: startY + y
-              });
-            }
-          }
-        }
-      }
-      
-      console.log(`Created ${manualPixels.length} manual text pixels`);
-      textPixelsRef.current = manualPixels;
-    } else {
-      textPixelsRef.current = textPixels;
-    }
-    
-    // Start initial animation
-    setAnimationState("initial");
-  }, []);
+    // Start the animation cycle
+    setAnimationState("hexagon");
+  }, [animationState, dimensions]);
   
-  // Run animation when state changes
+  // Run animation when state changes (and isn't "initial")
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || animationState === "initial") return;
     
     console.log(`Running animation for state: ${animationState}`);
     
@@ -127,22 +161,23 @@ const SignalAnimation = () => {
     const height = canvas.height;
     
     // Animation configuration
-    const pointSize = 2;
+    // Smaller screens get proportionally sized points
+    const pointSize = width < 600 ? Math.max(0.5, width / 800) : 1;
     const animationDuration = 2000;
-    const totalDelayTime = 800; // ms delay spread across all points
+    const totalDelayTime = 100;
     const pointDelay = totalDelayTime / pointsRef.current.length;
     
     // Color scale based on animation state
     const getColorScale = (t) => {
       switch (animationState) {
-        case "circle":
-          return d3.interpolateViridis(t);
+        case "hexagon":
+          return d3.interpolatePlasma(t);
         case "wave":
-          return d3.interpolateInferno(t);
+          return d3.interpolatePlasma(t);
         case "text":
           return d3.interpolatePlasma(t);
         default:
-          return d3.interpolateRainbow(t);
+          return d3.interpolatePlasma(t);
       }
     };
     
@@ -158,49 +193,231 @@ const SignalAnimation = () => {
     
     // Apply appropriate layout
     switch (animationState) {
-      case "circle":
-        // Circle/phyllotaxis layout
-        const theta = Math.PI * (3 - Math.sqrt(5)); // Golden angle
+      case "hexagon":
+        // Create a grid of evenly-spaced hexagons centered in the canvas
+        
+        // Calculate optimal hexagon size and spacing based on canvas dimensions
+        const hexMargin = width * 0.05; // 5% margin
+        const availableWidth = width - (hexMargin * 2);
+        const availableHeight = height * 0.5; // Use middle 50% of canvas
+        const verticalOffset = height * 0.05; // Start 5% down the canvas for vertical centering
+        
+        // Determine grid size based on screen size
+        // Reduced number of hexagons for small screens
+        const gridCols = width < 600 ? 2 : (width < 900 ? 4 : 6);
+        const gridRows = width < 600 ? 2 : (width < 900 ? 4 : 6);
+        
+        // Calculate hexagon dimensions
+        const hexHorizontalSpacing = availableWidth / gridCols;
+        const hexVerticalSpacing = availableHeight / gridRows;
+        const hexRadius = Math.min(hexHorizontalSpacing, hexVerticalSpacing) * 0.55;
+        const pointsPerEdge = Math.max(6, Math.min(10, Math.floor(width / 100))); // Scale with screen size
+        
+        // Function to create a proper hexagon with straight edges
+        function createHexagonPoints(centerX, centerY, size) {
+          const hexPoints = [];
+          
+          // Create 6 edges with points distributed along each edge
+          for (let edge = 0; edge < 6; edge++) {
+            // Calculate the start and end angles for this edge
+            const startAngle = edge * (Math.PI / 3);
+            const endAngle = ((edge + 1) % 6) * (Math.PI / 3);
+            
+            // Calculate start and end coordinates for this edge
+            const startX = centerX + Math.cos(startAngle) * size;
+            const startY = centerY + Math.sin(startAngle) * size;
+            const endX = centerX + Math.cos(endAngle) * size;
+            const endY = centerY + Math.sin(endAngle) * size;
+            
+            // Add points along this edge
+            for (let i = 0; i < pointsPerEdge; i++) {
+              const t = i / pointsPerEdge;
+              hexPoints.push({
+                x: startX + (endX - startX) * t,
+                y: startY + (endY - startY) * t,
+                edge: edge
+              });
+            }
+          }
+          
+          return hexPoints;
+        }
+        
+        // Generate all hexagons in the grid
+        const allHexagons = [];
+        
+        for (let row = 0; row < gridRows; row++) {
+          for (let col = 0; col < gridCols; col++) {
+            // Calculate center position with honeycomb offset
+            const offsetX = row % 2 === 0 ? 0 : hexHorizontalSpacing / 3;
+            
+            // Position hexagons evenly across available space in center of canvas
+            const centerX = hexMargin + (col * hexHorizontalSpacing) + (hexHorizontalSpacing / 3) + offsetX;
+            const centerY = verticalOffset + (row * hexVerticalSpacing) + (hexVerticalSpacing / 3);
+            
+            // Create this hexagon
+            const hexPoints = createHexagonPoints(centerX, centerY, hexRadius);
+            
+            // Add to collection with position info
+            allHexagons.push({
+              points: hexPoints,
+              centerX,
+              centerY,
+              row,
+              col
+            });
+          }
+        }
+        
+        // Distribute all points among the hexagons
         points.forEach((point, i) => {
-          const index = i;
-          const radius = 6 * Math.sqrt(index);
-          const angle = index * theta;
+          // Determine which hexagon and which point within that hexagon
+          const hexIndex = i % allHexagons.length;
+          const hex = allHexagons[hexIndex];
           
-          point.targetX = width / 2 + radius * Math.cos(angle);
-          point.targetY = height / 2 + radius * Math.sin(angle);
+          // Calculate point position within the hexagon
+          const pointsPerHex = Math.floor(points.length / allHexagons.length);
+          const indexInHex = Math.floor(i / allHexagons.length);
           
-          // Update color 
-          const t = i / points.length;
+          // If we have more points than edge points, add some interior points
+          let x, y;
+          let edgeIndex = -1;
+          
+          if (indexInHex < hex.points.length) {
+            // Place points along the edges
+            const hexPoint = hex.points[indexInHex];
+            x = hexPoint.x;
+            y = hexPoint.y;
+            edgeIndex = hexPoint.edge;
+          } else {
+            // Place additional points in the interior
+            const innerIndex = indexInHex - hex.points.length;
+            const innerRadius = hexRadius * (0.8 - (innerIndex % 5) * 0.15);
+            const angle = (innerIndex * 0.53) % (Math.PI * 2); // Use golden ratio for distribution
+            
+            x = hex.centerX + Math.cos(angle) * innerRadius;
+            y = hex.centerY + Math.sin(angle) * innerRadius;
+            edgeIndex = Math.floor(angle / (Math.PI / 3));
+          }
+          
+          // Position this point
+          point.targetX = x;
+          point.targetY = y;
+          
+          // Color based on position and edge
+          const rowColFactor = (hex.row / gridRows + hex.col / gridCols) / 2;
+          const edgeFactor = edgeIndex >= 0 ? edgeIndex / 6 : 0;
+          const t = (rowColFactor * 0.7 + edgeFactor * 0.3) % 1.0;
+          
           const color = d3.rgb(getColorScale(t));
           point.targetColor = [color.r / 255, color.g / 255, color.b / 255];
         });
         break;
         
       case "wave":
-        // Wave layout
+        // Pulsing EKG wave positioned in the bottom half of the canvas
+        // IMPORTANT CHANGE: Dynamic positioning of EKG based on screen size
+        // For small screens, place EKG lower to avoid text overlap
+        
+        // Calculate optimal EKG position based on screen size
+        const baseYPosition = width < 600 
+          ? height * 0.55  // On small screens, position EKG lower (55% down)
+          : height * 0.45; // On larger screens, keep it closer to middle (45% down)
+        
+        // Calculate EKG wave height that won't interfere with text
+        // Make the wave smaller on small screens
+        const ekgHeight = width < 600 
+          ? height * 0.07  // Smaller wave on small screens (7% of height)
+          : height * 0.1;  // Normal wave on larger screens (10% of height)
+          
+        // Reduce amplitude of the wave on small screens
+        const sWaveDepth = width < 600
+          ? height * 0.003  // Smaller S wave on small screens
+          : height * 0.004; // Normal S wave on larger screens
+          
+        const tWaveHeight = width < 600
+          ? height * 0.02  // Smaller T wave on small screens
+          : height * 0.03; // Normal T wave on larger screens
+          
+        // Thinner EKG line on small screens
+        const rowThickness = width < 600 ? 0.5 : 1.5;
+        
         points.forEach((point, i) => {
-          const xPos = (i % 100) * (width / 100);
-          const baseY = height / 2;
-          const waveHeight = 140;
-          const offset = Math.floor(i / 100) * 4;
-          const yPos = baseY + Math.sin((i % 100) / 15 + offset) * waveHeight * (0.5 + (i % 3) / 6);
+          // Distribute points across width
+          const xSegments = Math.max(50, Math.min(100, Math.floor(width / 10)));
+          const segment = i % xSegments;
+          const xPos = (width * segment) / xSegments;
+          
+          // Use our dynamic base position
+          const baseY = baseYPosition;
+          
+          // Create a single moving EKG spike
+          const now = Date.now();
+          const pulseSpeed = 5000; // Time for one complete cycle in ms
+          const pulsePosition = ((now % pulseSpeed) / pulseSpeed) * xSegments;
+          
+          // Calculate distance from spike center
+          const distanceFromSpike = Math.abs(segment - pulsePosition);
+          
+          let yPos;
+          
+          // Create the EKG spike pattern when near the pulse position
+          if (distanceFromSpike < 5) {
+            // Standard EKG pattern (P-QRS-T wave)
+            const localProgress = (5 - distanceFromSpike) / 5;
+            
+            if (distanceFromSpike < 1) {
+              // Main spike (R wave) - sharp upward peak
+              yPos = baseY - Math.pow(1 - distanceFromSpike, 2) * ekgHeight;
+            } 
+            else if (distanceFromSpike < 2) {
+              // S wave - small downward deflection after R
+              yPos = baseY + ((distanceFromSpike - 1) * (2 - distanceFromSpike)) * sWaveDepth;
+            }
+            else if (distanceFromSpike < 3.5) {
+              // T wave - smaller rounded upward deflection
+              const tWaveProgress = (distanceFromSpike - 2) / 1.5;
+              yPos = baseY - Math.sin(tWaveProgress * Math.PI) * tWaveHeight;
+            }
+            else {
+              // Return to baseline
+              yPos = baseY;
+            }
+          } 
+          else {
+            // Baseline with minimal variation (reduced from 2 to 0.5)
+            yPos = baseY + (Math.sin(segment * 0.1) * 0.5);
+          }
+          
+          // Add row offset for points to create thickness in the line
+          const rowIndex = Math.floor(i / xSegments);
+          
+          // Significantly reduced vertical spread for non-spike areas
+          // Calculate if we're in a spike area or not
+          const isNearSpike = distanceFromSpike < 5;
+          
+          // Use different row thickness based on proximity to spike
+          const effectiveRowThickness = isNearSpike ? rowThickness : rowThickness * 0.3;
+          
+          // Calculate row offset with reduced vertical spread for non-spike areas
+          const rowOffset = (rowIndex - Math.floor(points.length / xSegments / 2)) * effectiveRowThickness;
           
           point.targetX = xPos;
-          point.targetY = yPos;
+          point.targetY = yPos + rowOffset;
           
-          // Update color
-          const t = i / points.length;
+          // Color gradient with brighter colors near the spike
+          const t = Math.max(0, Math.min(1, 1 - (distanceFromSpike / xSegments) * 3));
           const color = d3.rgb(getColorScale(t));
           point.targetColor = [color.r / 255, color.g / 255, color.b / 255];
         });
         break;
         
       case "text":
-        // Text layout
+        // Text layout - keep the positions from the text pixels
         const textPixels = textPixelsRef.current;
         points.forEach((point, i) => {
           if (i < textPixels.length) {
-            // Assign to text pixel
+            // Assign to text pixel - no change needed as text is already positioned correctly
             point.targetX = textPixels[i].x;
             point.targetY = textPixels[i].y;
             
@@ -209,30 +426,9 @@ const SignalAnimation = () => {
             const color = d3.rgb(getColorScale(t));
             point.targetColor = [color.r / 255, color.g / 255, color.b / 255];
           } else {
-            // Move excess points off-screen
-            point.targetX = -100;
-            point.targetY = -100;
-            // Make them transparent
+            // Make excess points transparent
             point.targetColor = [0, 0, 0, 0];
           }
-        });
-        break;
-        
-      case "initial":
-        // Random to circle animation on start
-        const initTheta = Math.PI * (3 - Math.sqrt(5));
-        points.forEach((point, i) => {
-          const index = i;
-          const radius = 6 * Math.sqrt(index);
-          const angle = index * initTheta;
-          
-          point.targetX = width / 2 + radius * Math.cos(angle);
-          point.targetY = height / 2 + radius * Math.sin(angle);
-          
-          // Update color 
-          const t = i / points.length;
-          const color = d3.rgb(getColorScale(t));
-          point.targetColor = [color.r / 255, color.g / 255, color.b / 255];
         });
         break;
     }
@@ -308,15 +504,21 @@ const SignalAnimation = () => {
         // Animation complete, proceed to next state after a delay
         console.log(`Animation to ${animationState} complete`);
         
-        // Make clickable after completing the full cycle
-        if (animationState === "text") {
-          setClickable(true);
-        }
-        
         // Auto-advance to next state after a pause
         const timeoutId = setTimeout(() => {
-          advanceState();
-        }, 1500);
+          setAnimationState(prevState => {
+            switch (prevState) {
+              case "hexagon":
+                return "wave";
+              case "wave":
+                return "text";
+              case "text":
+                return "hexagon";
+              default:
+                return "hexagon";
+            }
+          });
+        }, 1000);
         
         return () => clearTimeout(timeoutId);
       }
@@ -331,33 +533,7 @@ const SignalAnimation = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [animationState]);
-  
-  // Function to advance to the next animation state
-  const advanceState = () => {
-    setAnimationState(prevState => {
-      switch (prevState) {
-        case "initial":
-          return "circle";
-        case "circle": 
-          return "wave";
-        case "wave":
-          return "text";
-        case "text":
-          return "circle";
-        default:
-          return "circle";
-      }
-    });
-  };
-  
-  // Canvas click handler for manual transitions
-  const handleCanvasClick = () => {
-    if (clickable) {
-      setClickable(false);
-      advanceState();
-    }
-  };
+  }, [animationState, dimensions]);
   
   // Helper functions
   function lerp(start, end, t) {
@@ -371,24 +547,17 @@ const SignalAnimation = () => {
   }
   
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-white">
-      <div className="relative w-full max-w-3xl">
+    <div className="w-full min-h-screen flex flex-col items-center justify-center bg-white p-4">
+      <div 
+        ref={containerRef}
+        className="w-full max-w-6xl mx-auto"
+      > 
         <canvas 
-          ref={canvasRef} 
-          width={800} 
-          height={400} 
-          className="w-full h-auto border border-gray-200 rounded shadow-lg bg-white"
-          onClick={handleCanvasClick}
+          ref={canvasRef}
+          className="w-full h-auto border border-gray-200 rounded-lg shadow-lg bg-white"
+          style={{ aspectRatio: '10/7' }}
         />
-        {/* {clickable && (
-          <div className="absolute top-4 right-4 text-lg font-bold text-gray-700">
-            Click Me!
-          </div>
-        )} */}
       </div>
-      {/* <div className="mt-4 text-sm text-gray-600">
-        Based on Nick Strayer's visualization technique using particle transitions between states
-      </div> */}
     </div>
   );
 };
